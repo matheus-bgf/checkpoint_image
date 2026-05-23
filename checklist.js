@@ -5,6 +5,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 async function main() {
+
     const browser = await chromium.launch({
         headless: process.env.HEADLESS !== 'false'
     });
@@ -17,6 +18,7 @@ async function main() {
     });
 
     try {
+
         console.log('[INFO] Acessando login do Grafana...');
 
         await page.goto(process.env.GRAFANA_LOGIN_URL, {
@@ -49,13 +51,106 @@ async function main() {
             timeout: 120000
         });
 
-        if (process.env.WAIT_SELECTOR) {
-            console.log('[INFO] Esperando painel carregar...');
+        console.log('[INFO] Esperando dashboard renderizar...');
 
-            await page.waitForSelector(process.env.WAIT_SELECTOR, {
-                timeout: 120000
-            });
+        await page.waitForLoadState('networkidle');
+
+        // Espera extra para os gráficos renderizarem
+        await page.waitForTimeout(10000);
+
+        // ================================
+        // MINIMIZA MENU LATERAL
+        // ================================
+
+        console.log('[INFO] Minimando menu lateral...');
+
+        try {
+
+            const selectors = [
+                '[aria-label="Toggle menu"]',
+                '[aria-label="Open menu"]',
+                '[aria-label="Close menu"]',
+                'button[aria-label*="menu"]'
+            ];
+
+            for (const selector of selectors) {
+
+                const button = page.locator(selector).first();
+
+                if (await button.count() > 0) {
+
+                    await button.click();
+
+                    console.log('[OK] Menu lateral minimizado.');
+
+                    await page.waitForTimeout(1500);
+
+                    break;
+                }
+            }
+
+        } catch (error) {
+
+            console.log('[WARN] Não foi possível minimizar o menu lateral.');
+
         }
+
+        // ================================
+        // REMOVE BARRA SUPERIOR
+        // ================================
+
+        console.log('[INFO] Removendo barra superior...');
+
+        await page.evaluate(() => {
+
+            const topBar =
+                document.querySelector('header');
+
+            if (topBar) {
+                topBar.style.display = 'none';
+            }
+
+            document.querySelectorAll(`
+                .top-nav-bar,
+                .page-toolbar,
+                .dashboard-controls,
+                .toolbar,
+                .page-header,
+                [data-testid="page-toolbar"],
+                [data-testid="dashboard-controls"]
+            `).forEach(el => {
+                el.style.display = 'none';
+            });
+
+            // Ajusta conteúdo principal
+            const main =
+                document.querySelector('main') ||
+                document.querySelector('.app-body') ||
+                document.querySelector('.page-scrollbar');
+
+            if (main) {
+                main.style.marginTop = '0';
+                main.style.paddingTop = '0';
+                main.style.width = '100%';
+                main.style.maxWidth = '100%';
+            }
+
+            document.body.style.margin = '0';
+            document.body.style.padding = '0';
+
+        });
+
+        // Espera layout reajustar
+        await page.waitForTimeout(1000);
+
+        // Volta para o topo
+        await page.evaluate(() => {
+            window.scrollTo(0, 0);
+        });
+
+        // ================================
+        // PREPARA PASTA
+        // ================================
 
         const outputDir = process.env.OUTPUT_DIR || './prints';
 
@@ -71,24 +166,33 @@ async function main() {
 
         console.log('[INFO] Removendo print antigo...');
 
-        // Remove o arquivo antigo se existir
         if (fs.existsSync(screenshotPath)) {
             fs.unlinkSync(screenshotPath);
         }
+
+        // ================================
+        // SCREENSHOT
+        // ================================
 
         console.log('[INFO] Tirando screenshot...');
 
         await page.screenshot({
             path: screenshotPath,
-            fullPage: process.env.FULL_PAGE !== 'false'
+            fullPage: false
         });
 
         console.log(`[OK] Screenshot salvo em: ${screenshotPath}`);
+
     } catch (error) {
+
         console.error('[ERRO]', error);
+
         process.exitCode = 1;
+
     } finally {
+
         await browser.close();
+
     }
 }
 
